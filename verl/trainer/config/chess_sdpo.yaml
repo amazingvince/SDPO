@@ -3,7 +3,7 @@ defaults:
   - _self_
 
 vars:
-  dir: ${oc.env:SDPO_DIR, ${hydra:runtime.cwd}}
+  dir: ${oc.env:SDPO_DIR, ${oc.env:PWD, .}}
   task: ${oc.env:TASK, datasets/chess}
   log_dir: ${oc.env:SDPO_LOG_DIR, ${vars.dir}/output}
   ckpt_dir: ${oc.env:SDPO_CKPT_DIR, ${vars.dir}/checkpoints}
@@ -12,7 +12,7 @@ data:
   train_files: ["${vars.dir}/${vars.task}/train.parquet"]
   val_files: ["${vars.dir}/${vars.task}/test.parquet"]
   max_prompt_length: 2048
-  max_response_length: 32
+  max_response_length: 4096
   filter_overlong_prompts: True
   trust_remote_code: True
   apply_chat_template_kwargs:
@@ -22,7 +22,11 @@ actor_rollout_ref:
   model:
     path: Qwen/Qwen3-8B
     trust_remote_code: True
+    use_remove_padding: True
   actor:
+    use_dynamic_bsz: True
+    ppo_micro_batch_size_per_gpu: null
+    ppo_max_token_len_per_gpu: 8192
     self_distillation:
       include_environment_feedback: True
       environment_feedback_only_without_solution: False
@@ -52,10 +56,6 @@ actor_rollout_ref:
       n: 4
       do_sample: True
 
-critic:
-  model:
-    path: Qwen/Qwen3-8B
-
 custom_reward_function:
   path: ${vars.dir}/verl/utils/reward_score/feedback/__init__.py
   name: compute_score
@@ -64,3 +64,4 @@ trainer:
   project_name: SDPO-chess
   group_name: ${oc.env:EXPERIMENT, chess}
   experiment_name: ${oc.env:EXPERIMENT, chess}
+  n_gpus_per_node: 2
