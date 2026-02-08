@@ -136,15 +136,28 @@ def main():
     parser.add_argument("--input_path", type=str, help="Path to full dataset file (json/jsonl/csv/parquet).")
     parser.add_argument("--train_path", type=str, help="Optional path to train split file.")
     parser.add_argument("--test_path", type=str, help="Optional path to test split file.")
+    parser.add_argument("--load_from_hf", type=str, help="Load dataset directly from HuggingFace (e.g., 'amazingvince/chess-traces').")
     parser.add_argument("--output_dir", type=str, required=True, help="Output directory for parquet files.")
-    parser.add_argument("--test_ratio", type=float, default=0.1, help="Test split ratio if using input_path.")
+    parser.add_argument("--test_ratio", type=float, default=0.001, help="Test split ratio if using input_path or load_from_hf.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for splitting.")
+    parser.add_argument("--train_size", type=int, default=100_000, help="Maximum number of training samples (applied after loading).")
+    parser.add_argument("--test_size", type=int, default=100, help="Maximum number of test samples (applied after loading).")
     parser.add_argument("--system_prompt", type=str, default=DEFAULT_SYSTEM_PROMPT)
     parser.add_argument("--no_legal_moves", action="store_true", help="Do not include legal moves in the prompt.")
     parser.add_argument("--max_legal_moves", type=int, default=None, help="Max number of legal moves to include.")
     args = parser.parse_args()
 
-    if args.train_path and args.test_path:
+    if args.load_from_hf:
+        # Load directly from HuggingFace
+        ds = datasets.load_dataset(args.load_from_hf)
+        if "train" in ds and "test" in ds:
+            train_ds = ds["train"]
+            test_ds = ds["test"]
+        else:
+            split = ds["train"].train_test_split(test_size=args.test_ratio, seed=args.seed, shuffle=True)
+            train_ds = split["train"]
+            test_ds = split["test"]
+    elif args.train_path and args.test_path:
         train_ds = _load_dataset(args.train_path)
         test_ds = _load_dataset(args.test_path)
     elif args.input_path:
@@ -153,7 +166,11 @@ def main():
         train_ds = split["train"]
         test_ds = split["test"]
     else:
-        raise ValueError("Provide --input_path or both --train_path and --test_path.")
+        raise ValueError("Provide --load_from_hf, --input_path, or both --train_path and --test_path.")
+
+    # Limit dataset sizes
+    train_ds = train_ds.select(range(min(args.train_size, len(train_ds))))
+    test_ds = test_ds.select(range(min(args.test_size, len(test_ds))))
 
     os.makedirs(args.output_dir, exist_ok=True)
     map_kwargs = {

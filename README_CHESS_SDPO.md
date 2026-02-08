@@ -29,26 +29,38 @@ You will need a CUDA-capable GPU and a recent PyTorch build compatible with your
 
 ## Prepare data
 
-Download the dataset and export to JSONL. Example:
+The preprocessing script can load the dataset directly from HuggingFace and automatically limit the dataset size. By default, it limits to 100k training samples and 100 test samples.
 
-```python
-from datasets import load_dataset
+**Recommended approach** (loads directly from HuggingFace):
 
-ds = load_dataset("amazingvince/chess-traces")
-
-if "train" in ds and "test" in ds:
-    train_ds = ds["train"]
-    test_ds = ds["test"]
-else:
-    split = ds["train"].train_test_split(test_size=0.1, seed=42, shuffle=True)
-    train_ds = split["train"]
-    test_ds = split["test"]
-
-train_ds.to_json("datasets/chess/train.jsonl")
-test_ds.to_json("datasets/chess/test.jsonl")
+```bash
+python data/preprocess_chess.py \
+  --load_from_hf amazingvince/chess-traces \
+  --output_dir datasets/chess
 ```
 
-Preprocess into SDPO-compatible parquet:
+To customize the dataset sizes:
+
+```bash
+python data/preprocess_chess.py \
+  --load_from_hf amazingvince/chess-traces \
+  --output_dir datasets/chess \
+  --train_size 50000 \
+  --test_size 200
+```
+
+If you prefer to hide legal moves from the student prompt:
+
+```bash
+python data/preprocess_chess.py \
+  --load_from_hf amazingvince/chess-traces \
+  --output_dir datasets/chess \
+  --no_legal_moves
+```
+
+**Alternative approach** (using local JSONL files):
+
+If you have already downloaded the dataset to local files:
 
 ```bash
 python data/preprocess_chess.py \
@@ -57,15 +69,7 @@ python data/preprocess_chess.py \
   --output_dir datasets/chess
 ```
 
-If you prefer to hide legal moves from the student prompt:
-
-```bash
-python data/preprocess_chess.py \
-  --train_path datasets/chess/train.jsonl \
-  --test_path datasets/chess/test.jsonl \
-  --output_dir datasets/chess \
-  --no_legal_moves
-```
+Note: Size limiting (via `--train_size` and `--test_size`) is also applied when using local files.
 
 ## Train
 
@@ -103,16 +107,11 @@ Qwen3 recommends thinking-mode sampling with:
 - `top_p=0.95`
 - `top_k=20`
 
-The chess config already sets `temperature=0.6` and `top_p=0.95`. If you want to fully match
-their suggested defaults, set:
+The chess config already sets these defaults for both rollout and validation sampling:
 
-```yaml
-actor_rollout_ref:
-  rollout:
-    top_k: 20
-    val_kwargs:
-      top_k: 20
-```
+- `temperature=0.6`
+- `top_p=0.95`
+- `top_k=20`
 
 ## Troubleshooting
 

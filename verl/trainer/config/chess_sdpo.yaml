@@ -1,6 +1,13 @@
 defaults:
-  - sdpo
+  - ppo_trainer
   - _self_
+
+# MAX_PROMPT_LENGTH=1024
+# MAX_RESPONSE_LENGTH=1536
+# MAX_FEEDBACK_LENGTH=2048
+# TEMPLATE_LENGTH=512
+# MAX_MODEL_LEN=$((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH + MAX_FEEDBACK_LENGTH + TEMPLATE_LENGTH))
+max_model_len: 6144
 
 vars:
   dir: ${oc.env:SDPO_DIR, ${oc.env:PWD, .}}
@@ -11,29 +18,64 @@ vars:
 data:
   train_files: ["${vars.dir}/${vars.task}/train.parquet"]
   val_files: ["${vars.dir}/${vars.task}/test.parquet"]
-  max_prompt_length: 2048
-  max_response_length: 4096
+  train_batch_size: 32
+  max_prompt_length: 1024
+  max_response_length: 1536
+  truncation: error
   filter_overlong_prompts: True
+  filter_overlong_prompts_workers: 8
   trust_remote_code: True
   apply_chat_template_kwargs:
     enable_thinking: true
 
 actor_rollout_ref:
+  hybrid_engine: true
+  nccl_timeout: 600
   model:
     path: Qwen/Qwen3-8B
     trust_remote_code: True
     use_remove_padding: True
+    enable_gradient_checkpointing: True
+    enable_activation_offload: False
+    use_shm: True
+    use_fused_kernels: True
   actor:
+    strategy: fsdp2
+    ppo_mini_batch_size: 32
+    policy_loss:
+      loss_mode: sdpo
+    fsdp_config:
+      strategy: fsdp2
+      dtype: bfloat16
+      param_offload: False
+      optimizer_offload: False
+      offload_policy: False
     use_dynamic_bsz: True
     ppo_micro_batch_size_per_gpu: null
-    ppo_max_token_len_per_gpu: 8192
+    ppo_max_token_len_per_gpu: ${max_model_len}
+    optim:
+      lr: 1e-5
+      lr_warmup_steps_ratio: 0.0
+      weight_decay: 0.01
     self_distillation:
+      full_logit_distillation: True
+      distillation_topk: 100
+      distillation_add_tail: True
+      alpha: 0.5
+      success_reward_threshold: 0.5
+      teacher_regularization: ema
+      teacher_update_rate: 0.05
+      max_reprompt_len: 4096
+      reprompt_truncation: right
+      dont_reprompt_on_self_success: True
       include_environment_feedback: True
       environment_feedback_only_without_solution: False
       remove_thinking_from_demonstration: True
+      is_clip: 2.0
       reprompt_template: |-
         Student prompt:
         {prompt}{solution}{feedback}
+
         Answer with a single UCI move.
       solution_template: |-
 
@@ -46,22 +88,68 @@ actor_rollout_ref:
 
         {feedback_raw}
   rollout:
+    name: vllm
+    dtype: bfloat16
+    tensor_model_parallel_size: ${oc.env:ROLLOUT_TP,1}
+    gpu_memory_utilization: ${oc.env:GPU_MEM_UTIL,0.7}
+    load_format: safetensors
+    n: 4
     temperature: 0.6
+    top_k: 20
     top_p: 0.95
     do_sample: True
-    n: 8
+    max_model_len: ${max_model_len}
+    max_num_batched_tokens: 8192
+    max_num_seqs: 256
+    enable_chunked_prefill: True
+    disable_log_stats: False
+    layered_summon: False
+    enforce_eager: False
+    free_cache_engine: True
+    calculate_log_probs: True
+    log_prob_use_dynamic_bsz: True
+    log_prob_max_token_len_per_gpu: ${max_model_len}
     val_kwargs:
+      top_k: 20
       top_p: 0.95
       temperature: 0.6
-      n: 4
+      n: 2
       do_sample: True
+  ref:
+    log_prob_use_dynamic_bsz: True
+    log_prob_max_token_len_per_gpu: ${max_model_len}
+
+algorithm:
+  adv_estimator: grpo
+  norm_adv_by_std_in_grpo: False
+  use_kl_in_reward: False
+  rollout_correction:
+    rollout_is: token
+    rollout_is_threshold: 2.0
+    rollout_is_batch_normalize: False
+
+critic:
+  enable: False
+
+reward_model:
+  use_reward_loop: False
 
 custom_reward_function:
   path: ${vars.dir}/verl/utils/reward_score/feedback/__init__.py
   name: compute_score
 
 trainer:
+  val_before_train: True
   project_name: SDPO-chess
   group_name: ${oc.env:EXPERIMENT, chess}
   experiment_name: ${oc.env:EXPERIMENT, chess}
-  n_gpus_per_node: 2
+  logger: ["console", "wandb"]
+  n_gpus_per_node: ${oc.env:N_GPUS_PER_NODE,2}
+  nnodes: ${oc.env:N_NODES,1}
+  save_freq: 100
+  test_freq: 25
+  total_epochs: 1
+  total_training_steps: 2000
+  max_actor_ckpt_to_keep: 2
+  default_local_dir: ${vars.ckpt_dir}/${trainer.experiment_name}
+  use_legacy_worker_impl: auto
