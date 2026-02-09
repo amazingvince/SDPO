@@ -30,11 +30,15 @@ fi
 
 GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.7}"
 ROLLOUT_TP="${ROLLOUT_TP:-1}"
+MODEL_PATH="${MODEL_PATH:-Qwen/Qwen3-8B}"
+VLLM_DISABLE_CASCADE_ATTN="${VLLM_DISABLE_CASCADE_ATTN:-false}"
 
 echo "Running: ${EXPERIMENT}"
 echo "SDPO_DIR=${SDPO_DIR}"
 echo "TASK=${TASK}"
 echo "WANDB_PROJECT=${WANDB_PROJECT}"
+echo "MODEL_PATH=${MODEL_PATH}"
+echo "VLLM_DISABLE_CASCADE_ATTN=${VLLM_DISABLE_CASCADE_ATTN}"
 
 bash "${ROOT_DIR}/training/verl_training.sh" "${EXPERIMENT}" chess_sdpo "${TASK}" \
   trainer.n_gpus_per_node=2 \
@@ -42,5 +46,7 @@ bash "${ROOT_DIR}/training/verl_training.sh" "${EXPERIMENT}" chess_sdpo "${TASK}
   trainer.project_name="${WANDB_PROJECT}" \
   trainer.experiment_name="${EXPERIMENT}" \
   trainer.group_name=chess \
+  actor_rollout_ref.model.path="${MODEL_PATH}" \
   actor_rollout_ref.rollout.gpu_memory_utilization="${GPU_MEM_UTIL}" \
-  actor_rollout_ref.rollout.tensor_model_parallel_size="${ROLLOUT_TP}"
+  actor_rollout_ref.rollout.tensor_model_parallel_size="${ROLLOUT_TP}" \
+  +actor_rollout_ref.rollout.engine_kwargs.vllm.disable_cascade_attn=${VLLM_DISABLE_CASCADE_ATTN}

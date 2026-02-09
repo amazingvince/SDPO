@@ -1,125 +1,102 @@
-# Chess SDPO (Qwen3-8B)
+# Chess SDPO (Qwen3-8B Reasoning)
 
-Train Qwen3-8B with SDPO using privileged chess reasoning traces as teacher hints.
+Train `Qwen/Qwen3-8B` with SDPO while using `reasoning_trace` as privileged teacher-only context.
 
-This setup:
-1. Uses the student prompt (FEN + optional legal moves).
-2. Feeds the teacher a reprompt that includes a successful solution (if any) plus
-   a feedback section that always contains `reasoning_trace`.
-3. Distills the teacher logits back into the student policy.
+Main config: `verl/trainer/config/chess_sdpo.yaml`.
 
-The config lives at `verl/trainer/config/chess_sdpo.yaml`.
+## Dataset schema
 
-## Dataset
-
-Expected columns per row:
+Each row should include:
 
 - `fen`: FEN string.
-- `valid_moves`: list of legal moves in UCI (optional but recommended).
-- `reasoning_trace`: natural-language hint / analysis text.
-- `chosen_move`: Stockfish best move in UCI.
-
-Dataset repo ID: `amazingvince/chess-traces`.
-
-## Install
-
-Follow `INSTALL.md` in the repo root.
-
-You will need a CUDA-capable GPU and a recent PyTorch build compatible with your driver.
+- `valid_moves`: list of legal UCI moves (recommended).
+- `reasoning_trace`: natural-language analysis/hint text.
+- `chosen_move`: target best move in UCI.
 
 ## Prepare data
 
-The preprocessing script can load the dataset directly from HuggingFace and automatically limit the dataset size. By default, it limits to 100k training samples and 100 test samples.
-
-**Recommended approach** (loads directly from HuggingFace):
-
-```bash
-python data/preprocess_chess.py \
-  --load_from_hf amazingvince/chess-traces \
-  --output_dir datasets/chess
-```
-
-To customize the dataset sizes:
+Recommended (directly from Hugging Face):
 
 ```bash
 python data/preprocess_chess.py \
   --load_from_hf amazingvince/chess-traces \
   --output_dir datasets/chess \
-  --train_size 50000 \
-  --test_size 200
+  --train_size 100000 \
+  --test_size 100 \
+  --max_reasoning_chars 3000
 ```
 
-If you prefer to hide legal moves from the student prompt:
-
-```bash
-python data/preprocess_chess.py \
-  --load_from_hf amazingvince/chess-traces \
-  --output_dir datasets/chess \
-  --no_legal_moves
-```
-
-**Alternative approach** (using local JSONL files):
-
-If you have already downloaded the dataset to local files:
+With local files:
 
 ```bash
 python data/preprocess_chess.py \
   --train_path datasets/chess/train.jsonl \
   --test_path datasets/chess/test.jsonl \
-  --output_dir datasets/chess
+  --output_dir datasets/chess \
+  --max_reasoning_chars 3000
 ```
 
-Note: Size limiting (via `--train_size` and `--test_size`) is also applied when using local files.
+Optional:
+
+- Hide legal moves from the student prompt: add `--no_legal_moves`.
+- Limit legal moves shown: add `--max_legal_moves 96`.
+- Set a different reasoning cap: add `--max_reasoning_chars <N>`.
 
 ## Train
+
+Preflight environment check:
+
+```bash
+python scripts/check_torch_cuda.py --min-gpus 2
+```
 
 ```bash
 export SDPO_DIR=/path/to/SDPO
 export TASK=datasets/chess
 export EXPERIMENT=chess-sdpo-qwen3
+export MODEL_PATH=Qwen/Qwen3-8B
 
-bash training/verl_training.sh $EXPERIMENT chess_sdpo $TASK
+bash training/verl_training.sh "$EXPERIMENT" chess_sdpo "$TASK"
 ```
 
-## Reasoning handling (important)
+## How privileged hints are used
 
-This setup is designed for privileged teacher hints:
+1. Student prompt contains only chess state context (`fen` and optional `valid_moves`), not `reasoning_trace`.
+2. `reasoning_trace` is stored in `extra_info` and appended into reward feedback in `verl/utils/reward_score/feedback/chess.py`.
+3. SDPO reprompting injects that feedback into the teacher message via `feedback_template`.
+4. Teacher logits (with privileged hint context) are distilled back to the student policy.
 
-1. The student prompt **does not** include `reasoning_trace`.
-2. The reward function in `verl/utils/reward_score/feedback/chess.py` always appends
-   `reasoning_trace` to the feedback text.
-3. SDPO’s reprompt template includes that feedback, so the **teacher** sees the hint.
-4. `apply_chat_template_kwargs.enable_thinking: true` allows Qwen3 to emit `<think>...</think>`
-   blocks during rollouts.
-5. `remove_thinking_from_demonstration: true` strips `<think>` blocks from successful
-   demonstrations to avoid distilling chain-of-thought into the student’s visible output.
+This follows the same teacher/student asymmetry pattern as OPSD-style privileged teacher prompting.
 
-If you want to distill chain-of-thought, set:
+`max_reasoning_chars=3000` is intentionally conservative: in a 1000-trace sample from
+`amazingvince/chess-traces`, we observed `avg_chars=834.26`, `p95=1568`, and `max=2117`.
 
-- `actor_rollout_ref.actor.self_distillation.remove_thinking_from_demonstration: false`
-- Consider updating the student prompt to explicitly allow reasoning output.
+## Important config notes
+
+- `actor_rollout_ref.model.use_fused_kernels` is set to `False`.
+  SDPO top-k/full-logit distillation requires logits that fused-kernel mode does not expose in this implementation.
+- Qwen3 thinking mode is enabled via `data.apply_chat_template_kwargs.enable_thinking: true`.
+- `remove_thinking_from_demonstration: true` prevents directly copying `<think>...</think>` spans from demonstrations.
 
 ## Qwen3 sampling defaults
 
-Qwen3 recommends thinking-mode sampling with:
+The config uses the Qwen3 thinking defaults:
 
-- `temperature=0.6`
-- `top_p=0.95`
-- `top_k=20`
+- `temperature: 0.6`
+- `top_p: 0.95`
+- `top_k: 20`
 
-The chess config already sets these defaults for both rollout and validation sampling:
+## Practical troubleshooting
 
-- `temperature=0.6`
-- `top_p=0.95`
-- `top_k=20`
-
-## Troubleshooting
-
-If the dataset is private or gated, login first:
+- If rollout/actor log-prob drift is high (`training/rollout_probs_diff_mean > 0.01` on long reasoning runs), add:
 
 ```bash
-huggingface-cli login
++actor_rollout_ref.rollout.engine_kwargs.vllm.disable_cascade_attn=True
 ```
 
-If you see excessively long outputs, lower `data.max_response_length` or disable thinking mode
-with `data.apply_chat_template_kwargs.enable_thinking: false`.
+- If outputs are too long, lower `data.max_response_length` or disable thinking mode.
+
+## Upstream fork note
+
+Your fork currently includes chess-specific files (`chess_sdpo.yaml`, `preprocess_chess.py`, chess reward).
+Recent `lasgroup/SDPO` upstream commits focus on reproducibility/dependency pinning and do not include this chess extension.

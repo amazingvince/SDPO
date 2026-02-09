@@ -1,3 +1,5 @@
+import os
+
 from datasets import load_dataset
 
 ds = load_dataset("amazingvince/chess-traces")
@@ -17,5 +19,6 @@ TEST_SIZE = 100
 train_ds = train_ds.select(range(min(TRAIN_SIZE, len(train_ds))))
 test_ds = test_ds.select(range(min(TEST_SIZE, len(test_ds))))
 
+os.makedirs("datasets/chess", exist_ok=True)
 train_ds.to_json("datasets/chess/train.jsonl")
 test_ds.to_json("datasets/chess/test.jsonl")

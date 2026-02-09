@@ -73,7 +73,7 @@ def _coerce_moves(value) -> list[str]:
     if value is None:
         return []
     if isinstance(value, list):
-        return [str(v) for v in value]
+        return [str(v).strip().lower() for v in value if str(v).strip()]
     if isinstance(value, str):
         value = value.strip()
         if not value:
@@ -81,11 +81,28 @@ def _coerce_moves(value) -> list[str]:
         try:
             parsed = json.loads(value)
             if isinstance(parsed, list):
-                return [str(v) for v in parsed]
+                return [str(v).strip().lower() for v in parsed if str(v).strip()]
         except json.JSONDecodeError:
             pass
-        return [v for v in value.replace(",", " ").split() if v]
-    return [str(value)]
+        return [v.lower() for v in value.replace(",", " ").split() if v]
+    return [str(value).strip().lower()] if str(value).strip() else []
+
+
+def _normalize_uci_move(value) -> str:
+    if value is None:
+        return ""
+    return str(value).strip().lower()
+
+
+def _normalize_reasoning_trace(value, max_reasoning_chars: int | None) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text:
+        return ""
+    if max_reasoning_chars is not None and max_reasoning_chars > 0 and len(text) > max_reasoning_chars:
+        return text[:max_reasoning_chars].rstrip()
+    return text
 
 
 def _format_legal_moves(moves: Iterable[str], max_moves: int | None) -> str:
@@ -102,11 +119,18 @@ def _build_prompt(fen: str, valid_moves, include_legal_moves: bool, max_legal_mo
     return f"FEN: {fen}\nReturn only the best move in UCI."
 
 
-def _map_row(example, idx, system_prompt: str, include_legal_moves: bool, max_legal_moves: int | None):
+def _map_row(
+    example,
+    idx,
+    system_prompt: str,
+    include_legal_moves: bool,
+    max_legal_moves: int | None,
+    max_reasoning_chars: int | None,
+):
     fen = example.get("fen", "")
     valid_moves = _coerce_moves(example.get("valid_moves"))
-    reasoning_trace = example.get("reasoning_trace", "")
-    chosen_move = example.get("chosen_move", "")
+    reasoning_trace = _normalize_reasoning_trace(example.get("reasoning_trace", ""), max_reasoning_chars)
+    chosen_move = _normalize_uci_move(example.get("chosen_move", ""))
 
     prompt = _build_prompt(fen, valid_moves, include_legal_moves, max_legal_moves)
 
@@ -131,6 +155,13 @@ def _write_split(ds: datasets.Dataset, out_path: str, **map_kwargs):
     write_rowgrouped_large(mapped, out_path)
 
 
+def _validate_required_columns(ds: datasets.Dataset, split_name: str):
+    required = {"fen", "chosen_move"}
+    missing = sorted(required - set(ds.column_names))
+    if missing:
+        raise ValueError(f"Missing required columns in {split_name}: {missing}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Preprocess chess dataset into SDPO-compatible parquet.")
     parser.add_argument("--input_path", type=str, help="Path to full dataset file (json/jsonl/csv/parquet).")
@@ -145,6 +176,12 @@ def main():
     parser.add_argument("--system_prompt", type=str, default=DEFAULT_SYSTEM_PROMPT)
     parser.add_argument("--no_legal_moves", action="store_true", help="Do not include legal moves in the prompt.")
     parser.add_argument("--max_legal_moves", type=int, default=None, help="Max number of legal moves to include.")
+    parser.add_argument(
+        "--max_reasoning_chars",
+        type=int,
+        default=3000,
+        help="Maximum number of characters retained from reasoning_trace for teacher-only hints.",
+    )
     args = parser.parse_args()
 
     if args.load_from_hf:
@@ -168,6 +205,9 @@ def main():
     else:
         raise ValueError("Provide --load_from_hf, --input_path, or both --train_path and --test_path.")
 
+    _validate_required_columns(train_ds, "train split")
+    _validate_required_columns(test_ds, "test split")
+
     # Limit dataset sizes
     train_ds = train_ds.select(range(min(args.train_size, len(train_ds))))
     test_ds = test_ds.select(range(min(args.test_size, len(test_ds))))
@@ -177,6 +217,7 @@ def main():
         "system_prompt": args.system_prompt,
         "include_legal_moves": not args.no_legal_moves,
         "max_legal_moves": args.max_legal_moves,
+        "max_reasoning_chars": args.max_reasoning_chars,
     }
 
     _write_split(train_ds, os.path.join(args.output_dir, "train.parquet"), **map_kwargs)
