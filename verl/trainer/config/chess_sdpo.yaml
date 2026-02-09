@@ -7,7 +7,7 @@ defaults:
 # MAX_FEEDBACK_LENGTH=2048
 # TEMPLATE_LENGTH=512
 # MAX_MODEL_LEN=$((MAX_PROMPT_LENGTH + MAX_RESPONSE_LENGTH + MAX_FEEDBACK_LENGTH + TEMPLATE_LENGTH))
-max_model_len: ${oc.env:MAX_MODEL_LEN,6144}
+max_model_len: ${oc.decode:${oc.env:MAX_MODEL_LEN,6144}}
 
 vars:
   dir: ${oc.env:SDPO_DIR, ${oc.env:PWD, .}}
@@ -15,14 +15,14 @@ vars:
   log_dir: ${oc.env:SDPO_LOG_DIR, ${vars.dir}/output}
   ckpt_dir: ${oc.env:SDPO_CKPT_DIR, ${vars.dir}/checkpoints}
   model_path: ${oc.env:MODEL_PATH, Qwen/Qwen3-8B}
-  rollout_n: ${oc.env:ROLLOUT_N,4}
+  rollout_n: ${oc.decode:${oc.env:ROLLOUT_N,4}}
 
 data:
   train_files: ["${vars.dir}/${vars.task}/train.parquet"]
   val_files: ["${vars.dir}/${vars.task}/test.parquet"]
-  train_batch_size: ${oc.env:TRAIN_BATCH_SIZE,32}
-  max_prompt_length: ${oc.env:MAX_PROMPT_LENGTH,1024}
-  max_response_length: ${oc.env:MAX_RESPONSE_LENGTH,1536}
+  train_batch_size: ${oc.decode:${oc.env:TRAIN_BATCH_SIZE,32}}
+  max_prompt_length: ${oc.decode:${oc.env:MAX_PROMPT_LENGTH,1024}}
+  max_response_length: ${oc.decode:${oc.env:MAX_RESPONSE_LENGTH,1536}}
   truncation: error
   filter_overlong_prompts: True
   filter_overlong_prompts_workers: 8
@@ -94,8 +94,8 @@ actor_rollout_ref:
   rollout:
     name: vllm
     dtype: bfloat16
-    tensor_model_parallel_size: ${oc.env:ROLLOUT_TP,1}
-    gpu_memory_utilization: ${oc.env:GPU_MEM_UTIL,0.7}
+    tensor_model_parallel_size: ${oc.decode:${oc.env:ROLLOUT_TP,1}}
+    gpu_memory_utilization: ${oc.decode:${oc.env:GPU_MEM_UTIL,0.6}}
     load_format: safetensors
     n: ${vars.rollout_n}
     temperature: 0.6
@@ -103,8 +103,8 @@ actor_rollout_ref:
     top_p: 0.95
     do_sample: True
     max_model_len: ${max_model_len}
-    max_num_batched_tokens: ${oc.env:MAX_NUM_BATCHED_TOKENS,8192}
-    max_num_seqs: ${oc.env:MAX_NUM_SEQS,256}
+    max_num_batched_tokens: ${oc.decode:${oc.env:MAX_NUM_BATCHED_TOKENS,4096}}
+    max_num_seqs: ${oc.decode:${oc.env:MAX_NUM_SEQS,32}}
     enable_chunked_prefill: True
     disable_log_stats: False
     layered_summon: False
@@ -148,8 +148,8 @@ trainer:
   group_name: ${oc.env:EXPERIMENT, chess}
   experiment_name: ${oc.env:EXPERIMENT, chess}
   logger: ["console", "wandb"]
-  n_gpus_per_node: ${oc.env:N_GPUS_PER_NODE,2}
-  nnodes: ${oc.env:N_NODES,1}
+  n_gpus_per_node: ${oc.decode:${oc.env:N_GPUS_PER_NODE,2}}
+  nnodes: ${oc.decode:${oc.env:N_NODES,1}}
   save_freq: 100
   test_freq: 25
   total_epochs: 1

@@ -237,9 +237,16 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
             # TODO: it seems that manual offload is slowly than FSDP offload
             self._is_offload_param = self.config.ref.fsdp_config.get("param_offload", False)
 
-        # normalize config
+        # normalize config (coerce to int; Hydra may provide str or list)
+        def _to_int(x):
+            if x is None:
+                return None
+            return int(x[0] if isinstance(x, (list, tuple)) else x)
+
         if self._is_actor:
-            self.config.actor.ppo_mini_batch_size *= self.config.rollout.n
+            ppo_mini = _to_int(self.config.actor.ppo_mini_batch_size)
+            rollout_n = _to_int(self.config.rollout.n)
+            self.config.actor.ppo_mini_batch_size = ppo_mini * rollout_n
             self.config.actor.ppo_mini_batch_size //= self.device_mesh.size() // self.ulysses_sequence_parallel_size
             assert self.config.actor.ppo_mini_batch_size > 0, (
                 f"ppo_mini_batch_size {self.config.actor.ppo_mini_batch_size} should be larger than 0 after "
@@ -247,6 +254,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
             )
             # micro bsz
             if self.config.actor.ppo_micro_batch_size is not None:
+                self.config.actor.ppo_micro_batch_size = _to_int(self.config.actor.ppo_micro_batch_size)
                 self.config.actor.ppo_micro_batch_size //= (
                     self.device_mesh.size() // self.ulysses_sequence_parallel_size
                 )
@@ -264,12 +272,16 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
 
         # normalize rollout config
         if self._is_rollout and self.config.rollout.log_prob_micro_batch_size is not None:
+            self.config.rollout.log_prob_micro_batch_size = _to_int(
+                self.config.rollout.log_prob_micro_batch_size
+            )
             self.config.rollout.log_prob_micro_batch_size //= (
                 self.device_mesh.size() // self.ulysses_sequence_parallel_size
             )
             self.config.rollout.log_prob_micro_batch_size_per_gpu = self.config.rollout.log_prob_micro_batch_size
         # normalize ref config
         if self._is_ref and self.config.ref.log_prob_micro_batch_size is not None:
+            self.config.ref.log_prob_micro_batch_size = _to_int(self.config.ref.log_prob_micro_batch_size)
             self.config.ref.log_prob_micro_batch_size //= self.device_mesh.size() // self.ulysses_sequence_parallel_size
             self.config.ref.log_prob_micro_batch_size_per_gpu = self.config.ref.log_prob_micro_batch_size
 
@@ -1267,10 +1279,18 @@ class CriticWorker(Worker, DistProfilerExtension):
         self._is_offload_param = self.config.model.fsdp_config.param_offload
         self._is_offload_optimizer = self.config.model.fsdp_config.optimizer_offload
 
-        # normalize config
-        self.config.ppo_mini_batch_size *= self.config.rollout_n
+        # normalize config (coerce to int; Hydra may provide str or list)
+        def _to_int(x):
+            if x is None:
+                return None
+            return int(x[0] if isinstance(x, (list, tuple)) else x)
+
+        self.config.ppo_mini_batch_size = _to_int(self.config.ppo_mini_batch_size) * _to_int(
+            self.config.rollout_n
+        )
         self.config.ppo_mini_batch_size //= torch.distributed.get_world_size() // self.ulysses_sequence_parallel_size
         if self.config.ppo_micro_batch_size is not None:
+            self.config.ppo_micro_batch_size = _to_int(self.config.ppo_micro_batch_size)
             self.config.ppo_micro_batch_size //= (
                 torch.distributed.get_world_size() // self.ulysses_sequence_parallel_size
             )

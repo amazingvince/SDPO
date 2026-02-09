@@ -12,12 +12,73 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from dataclasses import is_dataclass
-from typing import Any, Optional
+import typing
+from dataclasses import fields, is_dataclass
+from typing import Any, Optional, Union
 
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
 __all__ = ["omega_conf_to_dataclass", "validate_config"]
+
+
+def _coerce_dataclass_types(obj: Any, dataclass_type: type) -> Any:
+    """Coerce string values in a dataclass to their annotated types.
+
+    Hydra's ``oc.env`` resolver always returns strings, even for numeric values.
+    When cross-referenced (e.g. ``${data.train_batch_size}``), the string propagates.
+    This function coerces ``str`` values to ``int`` / ``float`` based on the
+    dataclass field type annotations, using ``object.__setattr__`` to bypass any
+    frozen-field checks.
+    """
+    if obj is None or isinstance(obj, type) or not is_dataclass(obj):
+        return obj
+
+    try:
+        hints = typing.get_type_hints(dataclass_type)
+    except Exception:
+        return obj
+
+    for f in fields(dataclass_type):
+        name = f.name
+        if name.startswith("_"):
+            continue
+
+        val = getattr(obj, name, None)
+        if val is None:
+            continue
+
+        target = hints.get(name)
+        if target is None:
+            continue
+
+        # Unwrap Optional[X] -> X
+        origin = typing.get_origin(target)
+        if origin is Union:
+            args = typing.get_args(target)
+            non_none = [a for a in args if a is not type(None)]
+            if len(non_none) == 1:
+                target = non_none[0]
+
+        # Coerce str -> int / float
+        if isinstance(val, str):
+            if target is int:
+                try:
+                    object.__setattr__(obj, name, int(val))
+                except (ValueError, TypeError):
+                    pass
+            elif target is float:
+                try:
+                    object.__setattr__(obj, name, float(val))
+                except (ValueError, TypeError):
+                    pass
+        # Coerce float -> int (e.g. 32.0 -> 32)
+        elif isinstance(val, float) and not isinstance(val, bool) and target is int:
+            try:
+                object.__setattr__(obj, name, int(val))
+            except (ValueError, TypeError):
+                pass
+
+    return obj
 
 
 def omega_conf_to_dataclass(config: DictConfig | dict, dataclass_type: Optional[type[Any]] = None) -> Any:
@@ -62,6 +123,9 @@ def omega_conf_to_dataclass(config: DictConfig | dict, dataclass_type: Optional[
     cfg_merged = OmegaConf.merge(cfg_from_dataclass, cfg)
     # now convert to `dataclass_type`
     config_object = OmegaConf.to_object(cfg_merged)
+    # Coerce any residual string values to their annotated types (int/float).
+    # This handles Hydra oc.env resolver returning strings for numeric fields.
+    _coerce_dataclass_types(config_object, dataclass_type)
     return config_object
 
 
@@ -84,29 +148,29 @@ def validate_config(
         use_critic (bool): is critic needed
     """
     # number of GPUs total
-    n_gpus = config.trainer.n_gpus_per_node * config.trainer.nnodes
+    n_gpus = int(config.trainer.n_gpus_per_node) * int(config.trainer.nnodes)
 
     if not config.actor_rollout_ref.actor.use_dynamic_bsz:
         if config.actor_rollout_ref.actor.strategy == "megatron":
             model_parallel_size = (
-                config.actor_rollout_ref.actor.megatron.tensor_model_parallel_size
-                * config.actor_rollout_ref.actor.megatron.pipeline_model_parallel_size
+                int(config.actor_rollout_ref.actor.megatron.tensor_model_parallel_size)
+                * int(config.actor_rollout_ref.actor.megatron.pipeline_model_parallel_size)
             )
             assert (
-                n_gpus % (model_parallel_size * config.actor_rollout_ref.actor.megatron.context_parallel_size) == 0
+                n_gpus % (model_parallel_size * int(config.actor_rollout_ref.actor.megatron.context_parallel_size)) == 0
             ), (
                 f"n_gpus ({n_gpus}) must be divisible by model_parallel_size ({model_parallel_size}) times "
                 f"context_parallel_size ({config.actor_rollout_ref.actor.megatron.context_parallel_size})"
             )
             megatron_dp = n_gpus // (
-                model_parallel_size * config.actor_rollout_ref.actor.megatron.context_parallel_size
+                model_parallel_size * int(config.actor_rollout_ref.actor.megatron.context_parallel_size)
             )
-            minimal_bsz = megatron_dp * config.actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu
+            minimal_bsz = megatron_dp * int(config.actor_rollout_ref.actor.ppo_micro_batch_size_per_gpu)
         else:
             minimal_bsz = n_gpus
 
         # 1. Check total batch size for data correctness
-        real_train_batch_size = config.data.train_batch_size * config.actor_rollout_ref.rollout.n
+        real_train_batch_size = int(config.data.train_batch_size) * int(config.actor_rollout_ref.rollout.n)
         assert real_train_batch_size % minimal_bsz == 0, (
             f"real_train_batch_size ({real_train_batch_size}) must be divisible by minimal possible batch size "
             f"({minimal_bsz})"

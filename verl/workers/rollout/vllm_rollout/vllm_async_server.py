@@ -202,7 +202,8 @@ class vLLMHttpServer:
 
         self.config: RolloutConfig = omega_conf_to_dataclass(config)
         self.model_config: HFModelConfig = omega_conf_to_dataclass(model_config, dataclass_type=HFModelConfig)
-        self.config.max_model_len = get_max_position_embeddings(self.model_config.hf_config)
+        # Ensure max_model_len is set and numeric; this field is mutable.
+        self.config.max_model_len = int(get_max_position_embeddings(self.model_config.hf_config))
         self.rollout_mode = rollout_mode
         self.workers = workers
 
@@ -262,7 +263,7 @@ class vLLMHttpServer:
             top_k=self.config.top_k,
             top_p=self.config.top_p,
             repetition_penalty=1.0,
-            max_new_tokens=self.config.response_length,
+            max_new_tokens=int(self.config.response_length),
         )
         logger.info(f"override_generation_config: {override_generation_config}")
 
@@ -484,7 +485,7 @@ class vLLMHttpServer:
             max_tokens = sampling_params.pop("max_new_tokens")
         else:
             # Default to a calculation that considers configured lengths
-            max_tokens = self.config.response_length + self.config.prompt_length - len(prompt_ids)
+            max_tokens = int(self.config.response_length) + int(self.config.prompt_length) - len(prompt_ids)
 
         # Clamp max_tokens to the valid range [0, max_possible_tokens]
         max_tokens = max(0, min(max_tokens, max_possible_tokens))

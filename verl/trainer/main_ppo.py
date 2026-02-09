@@ -209,18 +209,23 @@ class TaskRunner:
     def init_resource_pool_mgr(self, config):
         """Initialize resource pool manager."""
 
+        n_gpus_per_node = int(config.trainer.n_gpus_per_node)
+        nnodes = int(config.trainer.nnodes)
+
         global_pool_id = "global_pool"
         resource_pool_spec = {
-            global_pool_id: [config.trainer.n_gpus_per_node] * config.trainer.nnodes,
+            global_pool_id: [n_gpus_per_node] * nnodes,
         }
         # TODO Here you can use the new registration method to support dynamic registration of roles
         if config.reward_model.enable_resource_pool:
-            if config.reward_model.n_gpus_per_node <= 0:
+            rm_n_gpus = int(config.reward_model.n_gpus_per_node)
+            rm_nnodes = int(config.reward_model.nnodes)
+            if rm_n_gpus <= 0:
                 raise ValueError("config.reward_model.n_gpus_per_node must be greater than 0")
-            if config.reward_model.nnodes <= 0:
+            if rm_nnodes <= 0:
                 raise ValueError("config.reward_model.nnodes must be greater than 0")
 
-            reward_pool = [config.reward_model.n_gpus_per_node] * config.reward_model.nnodes
+            reward_pool = [rm_n_gpus] * rm_nnodes
             resource_pool_spec["reward_pool"] = reward_pool
 
         from verl.trainer.ppo.ray_trainer import ResourcePoolManager

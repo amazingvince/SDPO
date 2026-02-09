@@ -93,7 +93,7 @@ class SGLangHttpServer:
 
         self.config: RolloutConfig = omega_conf_to_dataclass(config)
         self.model_config: HFModelConfig = omega_conf_to_dataclass(model_config, dataclass_type=HFModelConfig)
-        self.config.max_model_len = get_max_position_embeddings(self.model_config.hf_config)
+        self.config.max_model_len = int(get_max_position_embeddings(self.model_config.hf_config))
         self.rollout_mode = rollout_mode
         self.workers = workers
 
@@ -303,7 +303,7 @@ class SGLangHttpServer:
             # support vllm-style 'max_tokens' param
             max_new_tokens = sampling_params.pop("max_tokens")
         else:
-            max_new_tokens = self.config.response_length + self.config.prompt_length - len(prompt_ids)
+            max_new_tokens = int(self.config.response_length) + int(self.config.prompt_length) - len(prompt_ids)
 
         # Clamp max_new_tokens to the valid range [0, max_possible_tokens]
         max_new_tokens = max(0, min(max_new_tokens, max_possible_tokens))

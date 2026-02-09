@@ -23,7 +23,7 @@ python data/preprocess_chess.py \
   --output_dir datasets/chess \
   --train_size 100000 \
   --test_size 100 \
-  --max_reasoning_chars 3000
+  --max_reasoning_chars 4000
 ```
 
 With local files:
@@ -88,10 +88,40 @@ The config uses the Qwen3 thinking defaults:
 
 ## Practical troubleshooting
 
+- If W&B init fails with `403 permission denied`:
+  - Re-login with a valid write-capable key:
+
+```bash
+wandb login --relogin <your_wandb_api_key>
+```
+
+  - Set your own entity explicitly (or leave it unset to use your default account):
+
+```bash
+export WANDB_ENTITY=<your_wandb_username_or_team>
+export WANDB_PROJECT=SDPO-chess
+```
+
 - If rollout/actor log-prob drift is high (`training/rollout_probs_diff_mean > 0.01` on long reasoning runs), add:
 
 ```bash
 +actor_rollout_ref.rollout.engine_kwargs.vllm.disable_cascade_attn=True
+```
+
+- If vLLM OOM appears during wake-up/resume (`wake_up(tags=["kv_cache"])`) and you want to keep context length unchanged, lower rollout concurrency/cache reservation instead:
+
+```bash
+export GPU_MEM_UTIL=0.6
+export MAX_NUM_BATCHED_TOKENS=4096
+export MAX_NUM_SEQS=32
+```
+
+  For persistent OOM during `wake_up(tags=["kv_cache"])`, use a stricter profile:
+
+```bash
+export GPU_MEM_UTIL=0.5
+export MAX_NUM_BATCHED_TOKENS=2048
+export MAX_NUM_SEQS=16
 ```
 
 - If outputs are too long, lower `data.max_response_length` or disable thinking mode.

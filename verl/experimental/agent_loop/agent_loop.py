@@ -544,7 +544,7 @@ class AgentLoopWorker:
         prompt_output = self.tokenizer.pad(
             {"input_ids": output.prompt_ids},
             padding="max_length",
-            max_length=self.config.actor_rollout_ref.rollout.prompt_length,
+            max_length=int(self.config.actor_rollout_ref.rollout.prompt_length),
             return_tensors="pt",
             return_attention_mask=True,
         )
@@ -556,7 +556,7 @@ class AgentLoopWorker:
         response_output = self.tokenizer.pad(
             {"input_ids": output.response_ids},
             padding="max_length",
-            max_length=self.config.actor_rollout_ref.rollout.response_length,
+            max_length=int(self.config.actor_rollout_ref.rollout.response_length),
             return_tensors="pt",
             return_attention_mask=True,
         )
@@ -567,7 +567,7 @@ class AgentLoopWorker:
         response_mask_output = self.tokenizer.pad(
             {"input_ids": output.response_mask},
             padding="max_length",
-            max_length=self.config.actor_rollout_ref.rollout.response_length,
+            max_length=int(self.config.actor_rollout_ref.rollout.response_length),
             return_tensors="pt",
             return_attention_mask=False,
         )
@@ -576,7 +576,7 @@ class AgentLoopWorker:
 
         response_logprobs = None
         if output.response_logprobs is not None:
-            pad_size = self.config.actor_rollout_ref.rollout.response_length - len(output.response_logprobs)
+            pad_size = int(self.config.actor_rollout_ref.rollout.response_length) - len(output.response_logprobs)
             response_logprobs = torch.tensor(output.response_logprobs + [0.0] * pad_size).unsqueeze(0)
 
         response_mask = response_mask_output["input_ids"] * response_output["attention_mask"]
@@ -869,14 +869,14 @@ class AgentLoopManager:
 
     def _initialize_llm_servers(self):
         rollout_world_size = (
-            self.config.actor_rollout_ref.rollout.tensor_model_parallel_size
-            * self.config.actor_rollout_ref.rollout.data_parallel_size
-            * self.config.actor_rollout_ref.rollout.pipeline_model_parallel_size
+            int(self.config.actor_rollout_ref.rollout.tensor_model_parallel_size)
+            * int(self.config.actor_rollout_ref.rollout.data_parallel_size)
+            * int(self.config.actor_rollout_ref.rollout.pipeline_model_parallel_size)
         )
         world_size = (
             self.worker_group.world_size
             if self.worker_group
-            else self.config.trainer.n_gpus_per_node * self.config.trainer.nnodes
+            else int(self.config.trainer.n_gpus_per_node) * int(self.config.trainer.nnodes)
         )
         num_replicas = world_size // rollout_world_size
 
@@ -887,7 +887,7 @@ class AgentLoopManager:
                 replica_rank=replica_rank,
                 config=rollout_config,
                 model_config=model_config,
-                gpus_per_node=self.config.trainer.n_gpus_per_node,
+                gpus_per_node=int(self.config.trainer.n_gpus_per_node),
             )
             for replica_rank in range(num_replicas)
         ]

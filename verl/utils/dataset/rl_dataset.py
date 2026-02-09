@@ -107,7 +107,7 @@ class RLHFDataset(Dataset):
         self.image_key = config.get("image_key", "images")
         self.video_key = config.get("video_key", "videos")
         self.image_patch_size = config.get("image_patch_size", 14)
-        self.max_prompt_length = config.get("max_prompt_length", 1024)
+        self.max_prompt_length = int(config.get("max_prompt_length", 1024))
         self.return_raw_chat = config.get("return_raw_chat", False)
         self.return_full_prompt = config.get("return_full_prompt", False)
         self.truncation = config.get("truncation", "error")
@@ -129,8 +129,10 @@ class RLHFDataset(Dataset):
                 logger.warning("Failed to initialize tools from %s: %s", self.tool_config_path, e)
                 self.tool_schemas = None
 
-        self.num_workers = config.get("filter_overlong_prompts_workers", max(1, os.cpu_count() // 4))
-        self.num_workers = min(self.num_workers, os.cpu_count()) if self.num_workers is not None else None
+        num_workers_val = config.get("filter_overlong_prompts_workers", max(1, os.cpu_count() // 4))
+        self.num_workers = int(num_workers_val) if num_workers_val is not None else None
+        if self.num_workers is not None:
+            self.num_workers = min(self.num_workers, os.cpu_count())
         self.use_shm = config.get("use_shm", False)
         self.chat_template_func = config.get("chat_template_func", None)
         self.need_tools_kwargs = config.get("need_tools_kwargs", False)

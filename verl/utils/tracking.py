@@ -64,15 +64,23 @@ class Tracking:
 
         if "tracking" in default_backend or "wandb" in default_backend:
             import os
+            import logging
 
             import wandb
 
-            settings = None
-            if config and config["trainer"].get("wandb_proxy", None):
-                settings = wandb.Settings(https_proxy=config["trainer"]["wandb_proxy"])
-            entity = os.environ.get("WANDB_ENTITY", None)
-            wandb.init(project=project_name, name=experiment_name, entity=entity, config=config, settings=settings, group=group_name)
-            self.logger["wandb"] = wandb
+            logger = logging.getLogger(__name__)
+            try:
+                settings = None
+                if config and config["trainer"].get("wandb_proxy", None):
+                    settings = wandb.Settings(https_proxy=config["trainer"]["wandb_proxy"])
+                entity = os.environ.get("WANDB_ENTITY", None)
+                wandb.init(project=project_name, name=experiment_name, entity=entity, config=config, settings=settings, group=group_name)
+                self.logger["wandb"] = wandb
+            except Exception as e:
+                logger.warning(
+                    "wandb init failed (%s). Continuing with other loggers only. To disable wandb, use trainer.logger=[console].",
+                    e,
+                )
 
         if "trackio" in default_backend:
             import trackio

@@ -408,10 +408,13 @@ class RayPPOTrainer:
             collate_fn = default_collate_fn
 
         num_workers = self.config.data["dataloader_num_workers"]
+        train_batch_size = int(
+            self.config.data.get("gen_batch_size", self.config.data.train_batch_size)
+        )
 
         self.train_dataloader = StatefulDataLoader(
             dataset=self.train_dataset,
-            batch_size=self.config.data.get("gen_batch_size", self.config.data.train_batch_size),
+            batch_size=train_batch_size,
             num_workers=num_workers,
             drop_last=True,
             collate_fn=collate_fn,
@@ -421,6 +424,8 @@ class RayPPOTrainer:
         val_batch_size = self.config.data.val_batch_size  # Prefer config value if set
         if val_batch_size is None:
             val_batch_size = len(self.val_dataset)
+        else:
+            val_batch_size = int(val_batch_size)
 
         self.val_dataloader = StatefulDataLoader(
             dataset=self.val_dataset,
@@ -439,10 +444,10 @@ class RayPPOTrainer:
             f"{len(self.val_dataloader)}"
         )
 
-        total_training_steps = len(self.train_dataloader) * self.config.trainer.total_epochs
+        total_training_steps = len(self.train_dataloader) * int(self.config.trainer.total_epochs)
 
         if self.config.trainer.total_training_steps is not None:
-            total_training_steps = self.config.trainer.total_training_steps
+            total_training_steps = int(self.config.trainer.total_training_steps)
 
         self.total_training_steps = total_training_steps
         print(f"Total training steps: {self.total_training_steps}")
@@ -1386,7 +1391,7 @@ class RayPPOTrainer:
 
         elif keep_minibatch:
             # Decouple the DP balancing and mini-batching.
-            minibatch_size = self.config.actor_rollout_ref.actor.get("ppo_mini_batch_size")
+            minibatch_size = int(self.config.actor_rollout_ref.actor.get("ppo_mini_batch_size"))
             minibatch_num = len(workload_lst) // minibatch_size
             global_partition_lst = [[] for _ in range(dp_size)]
             for i in range(minibatch_num):
@@ -1495,9 +1500,9 @@ class RayPPOTrainer:
             # step 2: convert from padding to no-padding
             batch_td = left_right_2_no_padding(batch_td)
             calculate_entropy = self.config.actor_rollout_ref.actor.entropy_coeff != 0.0
-            ppo_mini_batch_size = self.config.actor_rollout_ref.actor.ppo_mini_batch_size
-            ppo_mini_batch_size = ppo_mini_batch_size * self.config.actor_rollout_ref.rollout.n
-            ppo_epochs = self.config.actor_rollout_ref.actor.ppo_epochs
+            ppo_mini_batch_size = int(self.config.actor_rollout_ref.actor.ppo_mini_batch_size)
+            ppo_mini_batch_size = ppo_mini_batch_size * int(self.config.actor_rollout_ref.rollout.n)
+            ppo_epochs = int(self.config.actor_rollout_ref.actor.ppo_epochs)
             seed = self.config.actor_rollout_ref.actor.data_loader_seed
             shuffle = self.config.actor_rollout_ref.actor.shuffle
             tu.assign_non_tensor(
@@ -1525,9 +1530,9 @@ class RayPPOTrainer:
             batch_td = batch.to_tensordict()
             # step 2: convert from padding to no-padding
             batch_td = left_right_2_no_padding(batch_td)
-            ppo_mini_batch_size = self.config.critic.ppo_mini_batch_size
-            ppo_mini_batch_size = ppo_mini_batch_size * self.config.actor_rollout_ref.rollout.n
-            ppo_epochs = self.config.critic.ppo_epochs
+            ppo_mini_batch_size = int(self.config.critic.ppo_mini_batch_size)
+            ppo_mini_batch_size = ppo_mini_batch_size * int(self.config.actor_rollout_ref.rollout.n)
+            ppo_epochs = int(self.config.critic.ppo_epochs)
             seed = self.config.critic.data_loader_seed
             shuffle = self.config.critic.shuffle
             tu.assign_non_tensor(
@@ -1632,7 +1637,7 @@ class RayPPOTrainer:
                 # pass global_steps to trace
                 gen_batch.meta_info["global_steps"] = self.global_steps
                 gen_batch_output = gen_batch.repeat(
-                    repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True
+                    repeat_times=int(self.config.actor_rollout_ref.rollout.n), interleave=True
                 )
 
                 is_last_step = self.global_steps >= self.total_training_steps
@@ -1827,7 +1832,7 @@ class RayPPOTrainer:
                             adv_estimator=self.config.algorithm.adv_estimator,
                             gamma=self.config.algorithm.gamma,
                             lam=self.config.algorithm.lam,
-                            num_repeat=self.config.actor_rollout_ref.rollout.n,
+                            num_repeat=int(self.config.actor_rollout_ref.rollout.n),
                             norm_adv_by_std_in_grpo=norm_adv_by_std_in_grpo,
                             config=self.config.algorithm,
                         )
@@ -1840,7 +1845,7 @@ class RayPPOTrainer:
                         metrics.update(critic_output_metrics)
 
                     # implement critic warmup
-                    if self.config.trainer.critic_warmup <= self.global_steps:
+                    if int(self.config.trainer.critic_warmup) <= self.global_steps:
                         # update actor
                         with marked_timer("update_actor", timing_raw, color="red"):
                             actor_output = self._update_actor(batch)
@@ -1876,8 +1881,8 @@ class RayPPOTrainer:
                 # 2. It's the last training step.
                 # 3. The current step number is a multiple of the save frequency.
                 # 4. The ESI(Elastic Server Instance)/training plan is close to expiration.
-                if self.config.trainer.save_freq > 0 and (
-                    is_last_step or self.global_steps % self.config.trainer.save_freq == 0 or esi_close_to_expiration
+                if int(self.config.trainer.save_freq) > 0 and (
+                    is_last_step or self.global_steps % int(self.config.trainer.save_freq) == 0 or esi_close_to_expiration
                 ):
                     if esi_close_to_expiration:
                         print("Force saving checkpoint: ESI instance expiration approaching.")
