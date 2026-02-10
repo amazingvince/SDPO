@@ -77,6 +77,8 @@ This follows the same teacher/student asymmetry pattern as OPSD-style privileged
   SDPO top-k/full-logit distillation requires logits that fused-kernel mode does not expose in this implementation.
 - Qwen3 thinking mode is enabled via `data.apply_chat_template_kwargs.enable_thinking: true`.
 - `remove_thinking_from_demonstration: true` prevents directly copying `<think>...</think>` spans from demonstrations.
+- Chess reward shaping now gives small credit for strict single-move formatting and legal-but-wrong moves,
+  while keeping only correct moves above `success_reward_threshold`.
 
 ## Qwen3 sampling defaults
 
